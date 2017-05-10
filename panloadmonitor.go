@@ -5,9 +5,9 @@ import (
 	"encoding/xml"
 	"flag"
 	"fmt"
+	"github.com/xhoms/gopanosapi"
 	"log"
 	"os"
-	"github.com/xhoms/gopanosapi"
 	"path/filepath"
 	"time"
 )
@@ -54,7 +54,7 @@ type worker struct {
 	apiconn     gopanosapi.ApiConnector
 	outDir      string
 	interactive bool
-	ticker      *time.Ticker
+	tick        *time.Ticker
 }
 
 func (w *worker) interactivePrint(msg string) {
@@ -74,39 +74,54 @@ func (w *worker) writeCsv(data [][]string, fileName string) {
 	csvFile.Close()
 }
 
-func (w *worker) do() {
+func (w *worker) do(isPanorama, loop bool) {
 	now := time.Now()
+	if loop {
+		w.tick = time.NewTicker(24 * time.Hour)
+	}
 	for {
-		// Step 1: Let's get the list of managed devices
-		w.interactivePrint("Attempting to get the list of connected devices")
-		dgdata, dgerr := w.apiconn.Op(SHOWDEVICEGROUPS)
-		if !trueIfErr(w.apiconn, dgerr) {
-			deviceGroups := dgs{}
-			serialErr := xml.Unmarshal(dgdata, &deviceGroups)
+		fPrefix := fmt.Sprintf("%4d%02d%02d", now.Year(), now.Month(), now.Day())
+		w.interactivePrint(fmt.Sprintf("Sample prefix will be %v", fPrefix))
+		var csvSample [][]string
+		switch isPanorama {
+		case true:
+			// Step 1: Let's get the list of managed devices
+			w.interactivePrint("Attempting to get the list of connected devices")
+			dgdata, dgerr := w.apiconn.Op(SHOWDEVICEGROUPS)
+			if !trueIfErr(w.apiconn, dgerr) {
+				deviceGroups := dgs{}
+				serialErr := xml.Unmarshal(dgdata, &deviceGroups)
 
-			// Something is wrong parsing the Panorama xml response
-			if serialErr != nil {
-				fmt.Println(serialErr)
-				os.Exit(1)
+				// Something is wrong parsing the Panorama xml response
+				if serialErr != nil {
+					fmt.Println(serialErr)
+					os.Exit(1)
+				}
+
+				// Loop all serials to get performance data
+
+				for _, serial := range deviceGroups.getSerials() {
+					w.interactivePrint(fmt.Sprintf("Switching to device serial number %v", serial))
+					w.apiconn.SetTarget(serial)
+					csvSample = DataProc(w.apiconn)
+					outFileName := filepath.Join(w.outDir, fPrefix+"_"+serial+".csv")
+					w.interactivePrint(fmt.Sprintf("Saving %v", outFileName))
+					w.writeCsv(csvSample, outFileName)
+				}
+				w.apiconn.SetTarget("")
 			}
-
-			// Loop all serials to get performance data
-
-			fPrefix := fmt.Sprintf("%4d%02d%02d_", now.Year(), now.Month(), now.Day())
-			w.interactivePrint(fmt.Sprintf("Sample prefix will be %v", fPrefix))
-			var csvSample [][]string
-			for _, serial := range deviceGroups.getSerials() {
-				w.interactivePrint(fmt.Sprintf("Switching to device serial number %v", serial))
-				w.apiconn.SetTarget(serial)
-				csvSample = DataProc(w.apiconn)
-				outFileName := filepath.Join(w.outDir, fPrefix + serial + ".csv")
-				w.interactivePrint(fmt.Sprintf("Saving %v", outFileName))
-				w.writeCsv(csvSample, outFileName)
-			}
-			w.apiconn.SetTarget("")
+		case false:
+			csvSample = DataProc(w.apiconn)
+			outFileName := filepath.Join(w.outDir, fPrefix+".csv")
+			w.interactivePrint(fmt.Sprintf("Saving %v", outFileName))
+			w.writeCsv(csvSample, outFileName)
 		}
-		w.interactivePrint("Going to sleep until next tick ...")
-		now = <- w.ticker.C
+		if loop {
+			w.interactivePrint("Going to sleep until next tick ...")
+			now = <-w.tick.C
+		} else {
+			break
+		}
 	}
 }
 
@@ -119,6 +134,8 @@ func main() {
 	var helpNeeded = flag.Bool("help", false, "Show this help message")
 	var interactive = flag.Bool("i", false, "provide interactive (non cron) stepped information")
 	var outDir = flag.String("dir", "", "Output directory")
+	var isPanorama = flag.Bool("panorama", false, "Flag to loop through all devices connected to Panorama")
+	var loop = flag.Bool("loop", false, "Keep panloadmonitor running with a sample each 24h")
 	var err error
 	flag.Parse()
 	var wrkr worker
@@ -172,7 +189,5 @@ func main() {
 
 	wrkr.interactive = *interactive
 	wrkr.outDir = *outDir
-	wrkr.interactivePrint("Starting a 24H ticker")
-	wrkr.ticker = time.NewTicker(24 * time.Hour)
-	wrkr.do()
+	wrkr.do(*isPanorama, *loop)
 }
