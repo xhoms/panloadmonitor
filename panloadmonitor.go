@@ -33,18 +33,21 @@ type dgs struct {
 		Devices []struct {
 			Serial    string `xml:"serial"`
 			Connected string `xml:"connected"`
+			SwVersion string `xml:"sw-version"`
 		} `xml:"devices>entry"`
 	} `xml:"entry"`
 }
 
-func (d *dgs) getSerials() []string {
-	serials := make([]string, 0)
+func (d *dgs) getSerials() map[string]string {
+	serials := make(map[string]string)
 	for _, dg := range d.DG {
 		for _, dev := range dg.Devices {
 			if dev.Connected == "no" {
 				continue
 			}
-			serials = append(serials, dev.Serial)
+			if _, ok := serials[dev.Serial]; !ok {
+				serials[dev.Serial] = dev.SwVersion
+			}
 		}
 	}
 	return serials
@@ -100,10 +103,10 @@ func (w *worker) do(isPanorama, loop bool) {
 
 				// Loop all serials to get performance data
 
-				for _, serial := range deviceGroups.getSerials() {
+				for serial, swVersion := range deviceGroups.getSerials() {
 					w.interactivePrint(fmt.Sprintf("Switching to device serial number %v", serial))
 					w.apiconn.SetTarget(serial)
-					csvSample = DataProc(w.apiconn)
+					csvSample = DataProc(w.apiconn, swVersion)
 					outFileName := filepath.Join(w.outDir, fPrefix+"_"+serial+".csv")
 					w.interactivePrint(fmt.Sprintf("Saving %v", outFileName))
 					w.writeCsv(csvSample, outFileName)
@@ -111,7 +114,7 @@ func (w *worker) do(isPanorama, loop bool) {
 				w.apiconn.SetTarget("")
 			}
 		case false:
-			csvSample = DataProc(w.apiconn)
+			csvSample = DataProc(w.apiconn, w.apiconn.PanosVersion)
 			outFileName := filepath.Join(w.outDir, fPrefix+".csv")
 			w.interactivePrint(fmt.Sprintf("Saving %v", outFileName))
 			w.writeCsv(csvSample, outFileName)

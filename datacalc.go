@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/xml"
 	"github.com/xhoms/gopanosapi"
+	"log"
 	"strconv"
 	"strings"
 )
@@ -87,28 +88,36 @@ const SHOWRUNNINGPROC = "<show><running><resource-monitor><hour></hour></resourc
 const SHOWSYSTEMINFO = "<show><system><info></info></system></show>"
 const REPORTALL = "<type><appstat><aggregate-by><member>hour-of-receive_time</member></aggregate-by><values><member>nbytes</member></values></appstat></type><period>last-24-hrs</period><topn>25</topn><topm>10</topm>"
 
-func DataProc(apiC gopanosapi.ApiConnector) (csvData [][]string) {
+func DataProc(apiC gopanosapi.ApiConnector, swVersion string) (csvData [][]string) {
+	swVerParts := strings.Split(swVersion, ".")
+	major, _ := strconv.Atoi(swVerParts[0])
+	major2, _ := strconv.Atoi(swVerParts[1])
+	asyncRequest := 10*major+major2 > 60
 	csvData = make([][]string, 25)
 	csvData[0] = []string{"hour", "dpload", "mbps"}
 	// let's get the show system info data
+	var response []byte
+	var err error
 	var sinfo sysInfoStruct
-	response, err := apiC.Op(SHOWSYSTEMINFO)
+	response, err = apiC.Op(SHOWSYSTEMINFO)
 	trueIfErr(apiC, err)
 	xml.Unmarshal(response, &sinfo)
 	sinfo.processData()
-
 	// let's get the show running process data
 	response, err = apiC.Op(SHOWRUNNINGPROC)
 	if trueIfErr(apiC, err) {
 		return
 	}
 	var values dataProcsStruct
-	xml.Unmarshal(response, &values)
+	err = xml.Unmarshal(response, &values)
+	if err != nil {
+		log.Fatal(err)
+	}
 	values.processData(sinfo.hour)
 
 	var rdataAll reportStruct
 	// let's get the allApps data
-	response, err = apiC.Report(gopanosapi.REPORT_DYNAMIC, "", REPORTALL)
+	response, err = apiC.Report(gopanosapi.REPORT_DYNAMIC, "", REPORTALL, asyncRequest)
 	if trueIfErr(apiC, err) {
 		return
 	}
