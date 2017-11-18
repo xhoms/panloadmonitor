@@ -45,7 +45,7 @@ type dataProcsStruct struct {
 	DP struct {
 		DPN []struct {
 			XMLName xml.Name
-			Entry   []struct {
+			Entry []struct {
 				Value string `xml:"value"`
 			} `xml:"hour>cpu-load-average>entry"`
 		} `xml:",any"`
@@ -71,10 +71,10 @@ func (dproc *dataProcsStruct) processData(hour int) {
 
 func (dproc *dataProcsStruct) sampleByHour(hour, firstCore int) float64 {
 	var idx, loadSum int
-	if hour > dproc.takenH {
-		idx = 24 + dproc.takenH - hour
+	if hour > dproc.takenH-1 {
+		idx = 23 + dproc.takenH - hour
 	} else {
-		idx = dproc.takenH - hour
+		idx = dproc.takenH - hour - 1
 	}
 	for dataPlane := 0; dataPlane < dproc.dps; dataPlane++ {
 		for coreNum := firstCore; coreNum < dproc.cores; coreNum++ {
